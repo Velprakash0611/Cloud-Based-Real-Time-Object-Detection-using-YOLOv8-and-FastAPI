@@ -6,7 +6,7 @@ import base64
 import cv2
 import numpy as np
 import io
-
+#api call
 API_URL = "https://cloud-based-real-time-object-detection.onrender.com/predict"
 
 def encode_image(image_path):
