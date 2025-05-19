@@ -1,76 +1,65 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from ultralytics import YOLO
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk
+import requests
+import base64
 import cv2
 import numpy as np
-import base64
-import os
+import io
 
-app = FastAPI()
+API_URL = "https://cloud-based-real-time-object-detection.onrender.com/predict"
 
-# Use lightweight model for performance
-MODEL_PATH = "yolov8n.pt"
-if not os.path.exists(MODEL_PATH):
-    from ultralytics.utils.downloads import attempt_download_asset
-    attempt_download_asset(MODEL_PATH)
+def encode_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode("utf-8")
 
-model = YOLO(MODEL_PATH)
+def detect_objects():
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Image Files", "*.jpg *.jpeg *.png")]
+    )
+    if not file_path:
+        return
 
-class ImageRequest(BaseModel):
-    image: str  # base64 encoded image string
+    encoded_img = encode_image(file_path)
 
-@app.get("/")
-def root():
-    return {"message": "YOLOv8 FastAPI server is running!"}
-
-@app.post("/predict")
-def predict(data: ImageRequest):
     try:
-        # Decode base64 image
-        try:
-            img_bytes = base64.b64decode(data.image)
-            np_arr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        except Exception as decode_error:
-            return {"success": False, "error": f"Image decoding failed: {str(decode_error)}"}
+        response = requests.post(API_URL, json={"image": encoded_img}, timeout=15)
+        result = response.json()
 
-        if img is None or not isinstance(img, np.ndarray):
-            return {"success": False, "error": "Decoded image is invalid or None."}
+        if not result.get("success"):
+            messagebox.showerror("Error", result.get("error"))
+            return
 
-        # Resize image for consistent processing
-        img = cv2.resize(img, (640, 480))
+        image = cv2.imread(file_path)
+        image = cv2.resize(image, (640, 480))
 
-        # Run YOLO inference
-        try:
-            results = model(img)
-        except Exception as model_error:
-            return {"success": False, "error": f"YOLO model inference failed: {str(model_error)}"}
+        for pred in result["predictions"]:
+            x1, y1, x2, y2 = pred["xyxy"]
+            label = pred["label"]
+            conf = pred["confidence"]
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(image, f"{label} {conf:.2f}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        # Annotate image
-        annotated_img = results[0].plot()
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(image)
+        img_tk = ImageTk.PhotoImage(img_pil)
 
-        # Encode annotated image to base64
-        _, img_encoded = cv2.imencode(".jpg", annotated_img)
-        img_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
+        image_label.config(image=img_tk)
+        image_label.image = img_tk
 
-        # Prepare predictions
-        predictions = []
-        for box in results[0].boxes:
-            if box.conf[0] > 0.4:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                label = results[0].names[int(box.cls[0])]
-                confidence = float(box.conf[0])
-                predictions.append({
-                    "label": label,
-                    "confidence": round(confidence, 2),
-                    "xyxy": [x1, y1, x2, y2]
-                })
+    except requests.exceptions.RequestException as e:
+        messagebox.showerror("Request Error", str(e))
 
-        return {
-            "success": True,
-            "predictions": predictions,
-            "annotated_image": img_base64
-        }
+# UI Setup
+root = tk.Tk()
+root.title("YOLOv8 Object Detection")
+root.geometry("700x600")
 
-    except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {str(e)}"}
+btn_upload = tk.Button(root, text="Upload and Detect Image", command=detect_objects, font=("Arial", 14))
+btn_upload.pack(pady=20)
+
+image_label = tk.Label(root)
+image_label.pack()
+
+root.mainloop()
