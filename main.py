@@ -1,15 +1,15 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-import base64
-import numpy as np
-import cv2
 from ultralytics import YOLO
+import cv2
+import numpy as np
+import base64
 
 app = FastAPI()
-model = YOLO("yolov8s.pt")  # or yolov8n.pt for speed
+model = YOLO("yolov8s.pt")
 
 class ImageRequest(BaseModel):
-    image: str  # base64-encoded image
+    image: str  # base64 encoded image string
 
 @app.get("/")
 def root():
@@ -18,14 +18,26 @@ def root():
 @app.post("/predict")
 def predict(data: ImageRequest):
     try:
-        # Decode the image
-        img_bytes = base64.b64decode(data.image)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        # Step 1: Decode base64 image safely
+        try:
+            img_bytes = base64.b64decode(data.image)
+            np_arr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        except Exception as decode_error:
+            return {"success": False, "error": f"Image decoding failed: {str(decode_error)}"}
 
-        results = model(img)
+        # Step 2: Validate decoded image
+        if img is None or not isinstance(img, np.ndarray):
+            return {"success": False, "error": "Decoded image is invalid or None."}
+
+        # Step 3: Run YOLO inference
+        try:
+            results = model(img)
+        except Exception as model_error:
+            return {"success": False, "error": f"YOLO model inference failed: {str(model_error)}"}
+
+        # Step 4: Extract predictions
         predictions = []
-
         for box in results[0].boxes:
             if box.conf[0] > 0.4:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -33,11 +45,11 @@ def predict(data: ImageRequest):
                 confidence = float(box.conf[0])
                 predictions.append({
                     "label": label,
-                    "confidence": confidence,
+                    "confidence": round(confidence, 2),
                     "xyxy": [x1, y1, x2, y2]
                 })
 
         return {"success": True, "predictions": predictions}
-    
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Unexpected server error: {str(e)}"}
