@@ -8,7 +8,7 @@ import os
 
 app = FastAPI()
 
-# Use yolov8n.pt (nano model) for faster inference
+# Use lightweight model for performance
 MODEL_PATH = "yolov8n.pt"
 if not os.path.exists(MODEL_PATH):
     from ultralytics.utils.downloads import attempt_download_asset
@@ -26,7 +26,7 @@ def root():
 @app.post("/predict")
 def predict(data: ImageRequest):
     try:
-        # Step 1: Decode base64 image safely
+        # Decode base64 image
         try:
             img_bytes = base64.b64decode(data.image)
             np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -34,20 +34,26 @@ def predict(data: ImageRequest):
         except Exception as decode_error:
             return {"success": False, "error": f"Image decoding failed: {str(decode_error)}"}
 
-        # Step 2: Validate decoded image
         if img is None or not isinstance(img, np.ndarray):
             return {"success": False, "error": "Decoded image is invalid or None."}
 
-        # Step 3: Resize for faster inference
+        # Resize image for consistent processing
         img = cv2.resize(img, (640, 480))
 
-        # Step 4: Run YOLO inference
+        # Run YOLO inference
         try:
             results = model(img)
         except Exception as model_error:
             return {"success": False, "error": f"YOLO model inference failed: {str(model_error)}"}
 
-        # Step 5: Extract predictions
+        # Annotate image
+        annotated_img = results[0].plot()
+
+        # Encode annotated image to base64
+        _, img_encoded = cv2.imencode(".jpg", annotated_img)
+        img_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
+
+        # Prepare predictions
         predictions = []
         for box in results[0].boxes:
             if box.conf[0] > 0.4:
@@ -60,7 +66,11 @@ def predict(data: ImageRequest):
                     "xyxy": [x1, y1, x2, y2]
                 })
 
-        return {"success": True, "predictions": predictions}
+        return {
+            "success": True,
+            "predictions": predictions,
+            "annotated_image": img_base64
+        }
 
     except Exception as e:
         return {"success": False, "error": f"Unexpected server error: {str(e)}"}
