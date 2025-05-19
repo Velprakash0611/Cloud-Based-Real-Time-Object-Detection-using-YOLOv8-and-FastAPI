@@ -11,6 +11,10 @@ model = YOLO("yolov8s.pt")  # or yolov8n.pt for speed
 class ImageRequest(BaseModel):
     image: str  # base64-encoded image
 
+@app.get("/")
+def root():
+    return {"message": "YOLOv8 FastAPI server is running!"}
+
 @app.post("/predict")
 def predict(data: ImageRequest):
     try:
