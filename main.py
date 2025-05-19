@@ -4,9 +4,17 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import base64
+import os
 
 app = FastAPI()
-model = YOLO("yolov8s.pt")
+
+# Use yolov8n.pt (nano model) for faster inference
+MODEL_PATH = "yolov8n.pt"
+if not os.path.exists(MODEL_PATH):
+    from ultralytics.utils.downloads import attempt_download_asset
+    attempt_download_asset(MODEL_PATH)
+
+model = YOLO(MODEL_PATH)
 
 class ImageRequest(BaseModel):
     image: str  # base64 encoded image string
@@ -30,13 +38,16 @@ def predict(data: ImageRequest):
         if img is None or not isinstance(img, np.ndarray):
             return {"success": False, "error": "Decoded image is invalid or None."}
 
-        # Step 3: Run YOLO inference
+        # Step 3: Resize for faster inference
+        img = cv2.resize(img, (640, 480))
+
+        # Step 4: Run YOLO inference
         try:
             results = model(img)
         except Exception as model_error:
             return {"success": False, "error": f"YOLO model inference failed: {str(model_error)}"}
 
-        # Step 4: Extract predictions
+        # Step 5: Extract predictions
         predictions = []
         for box in results[0].boxes:
             if box.conf[0] > 0.4:
